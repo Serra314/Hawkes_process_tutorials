@@ -1,0 +1,72 @@
+#######################
+# Sequence parameters #
+#######################
+
+start.date = "2016-08-24 01:36:32 BST"
+end.date = "2017-08-15 19:25:33 BST"
+magnitude.completeness = 2.99
+min.longitude = 12.9
+max.longitude = 13.5
+min.latitude = 42.4
+max.latitude = 43.08
+catalog.path = "data/ISIDE_M2.5.txt"
+catalog.header = TRUE
+catalog.sep = ' '
+catalog.skip = 0
+catalog.colnames = NULL
+
+##########
+# Priors #
+##########
+
+a_mu = 0.1
+b_mu = 0.1
+a_K = -1 
+b_K = 2.03
+a_alpha = 0
+b_alpha = 10
+a_c = 0
+b_c = 10
+a_p = 1
+b_p = 10
+
+##################
+# Initial values #
+##################
+
+th.mu.init = 0.5
+th.K.init = 0.5
+th.alpha.init = -2
+th.c.init = -2 
+th.p.init = -2
+
+###################
+# Inlabru options #
+###################
+
+max_iter = 100
+max_step = NULL
+
+###########################
+# Time binning parameters #
+###########################
+
+coef.t = 1 
+DELTA = 0.1
+Nmax = 3
+
+############
+# Forecast #
+############
+
+n.periods = 120
+period.length = 1
+start.date.fore = "2016-08-24 02:00:00 BST"
+magnitude.update = 5.5
+
+###############
+# Output name #
+###############
+
+output.name = 'report_ETAS'
+

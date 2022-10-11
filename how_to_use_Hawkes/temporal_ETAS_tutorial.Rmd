@@ -1,0 +1,316 @@
+---
+title: "Temporal ETAS automatic - Tutorial"
+author: "Francesco Serafini"
+date: "2022-09-29"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warnings = FALSE, message = FALSE)
+# load the functions needed for this analysis
+source('hawkes_functions.R')
+```
+
+# Aim
+
+This tutorial aims to illustrate how to efficiently use our method to implement a temporal ETAS model. Our goal is to  give to researcher the possibility of using our temporal ETAS implementation with minimum effort and to be able to retrieve informations from the model in an easy and accessible way. We provided a number of functions to accomplish the basic tasks required for a Bayesian analysis of an ETAS model. Indeed we provide functions to fit the model, retrieve the posterior distribution of the parameters, sampling from the posterior distribution of the parameters, retrieve the posterior distribution of the number of events, produce catalogue-based forecast and extract informations from the forecasts such as posterior predictive intervals of the number of events for each period.
+
+# The input file
+
+The present code works taking as input a \texttt{txt} file provided by the user. For the present example we have called our file \texttt{user\_input.txt}.
+
+The rows of the input file can be placed in any order but the names of the variable should always remain fixed. The input file is divided in six sections: Sequence parameters, Priors, Initial values, Inlabru options, Time binning parameters, Forecast, and Output name. Below we report the arguments needed in each section with a brief explanation of their meaning. 
+
+## Sequence parameters
+
+The sequence parameters needs the following arguments:
+
+* **start.date** = starting date of the catalogue with format "yyyy-mm-dd hh:mm:ss". All events recorded before this date will be discarded.
+* **end.date** = end date of the catalogue with format "yyyy-mm-dd hh:mm:ss". All events recorded after this date will be discarded.
+* **magnitude.completeness** = magnitude of completeness for the catalogue. All events with magnitude greater than this value will be discarded. 
+* **min.longitude** = minimum longitude coordinate. All events with longitude smaller than this value will be discarded.
+* **max.longitude** = maximum longitude coordinate. All events with longitude greater than this value will be discarded.
+* **min.latitude** = minimum latitude coordinate. All events with latitude smaller than this value will be discarded.
+* **max.latitude** = maximum latitude coordinate. All events with latitude greater than this value will be discarded.
+* **catalog.path** = path of the catalogue file, it must be in \texttt{txt} format
+* **catalog.header** = TRUE or FALSE indicating if the first row of the provided catalogue contains the name of the columns 
+* **catalog.sep** = string representing the columns separator 
+* **catalog.skip** = integer indicating the number of lines of the data file to skip before beginning to read data
+* **catalog.colnames** = vector of column names to be provided in the format \texttt{c(col1.name, col2.name, ....)} if \texttt{catalog.header = TRUE} this will be ignored. 
+
+The provided catalogue needs to be in a specific format. First of all, it has to be a \texttt{txt} file. Second, the column of the observed times must be called \texttt{time\_string} and the times must be formatted using "yyyy-mm-ddThh:mm:ss" or "yyyy-mm-dd hh:mm:ss"; the longitude column must be called \texttt{Lon}; the latitude column must be called \texttt{Lat}; the magnitude column must be called \texttt{magnitudes}. If the provided catalog do not follow the above rules the code will return an error.
+
+## Priors
+
+The priors parameters define the prior distribution for each parameter of the temporal ETAS model, namely $\mu, K, \alpha, c, p$. For the time being, the distribution family for each parameter is fixed and the user can only control the parameters of such family. The parameters are assumed to have the following prior distributions
+
+$$
+\begin{aligned}
+\mu & \sim \text{Gamma}(a_{\mu}, b_{\mu}) \\ 
+K & \sim \text{LogGaus}(a_{K},b_{K}) \\ 
+\alpha & \sim \text{Unif}(a_{\alpha},b_{\alpha}) \\ 
+c & \sim \text{Unif}(a_{c},b_{c}) \\
+p & \sim \text{Unif}(a_{p},b_{p})
+\end{aligned}
+$$
+The user has to provide the values of $a_\mu, b_\mu,a_K, b_K,a_\alpha, b_\alpha,a_c, b_c,a_p, b_p$.
+
+## Initial values
+
+The user has to specify the initial values of the parameters in the INLA internal scale. They will be used as first step in the inlabru algorithm and it is safer if they are set to not represents particular cases. Example of cases to be avoided are values for which one of the parameters is zero or one of the parameters has a particularly high value. The initial values are single digit for each parameter. For example, the parameter \texttt{th.mu.init} is the initial value of parameter $\mu$, \texttt{th.K.init} for parameter $K$, and so on.
+
+## Inlabru options
+
+These options regulates the inlabru algorithm. We provide the user the possibility to speicify only two parameters:
+
+* **max_iter** = maximum number of iterations for the inlabru algorithm. The number of iterations will be less than this number if the algorithm have converged
+
+* **max_step** = this parameters refers to *how far* the parameter value can jump from one iteration to another. The greater the value the greater the potential jump. Setting a value different from \texttt{NULL} prevents the inlabru algorithm to check for convergence and the algorithm will run exactly the number of iterations specified in \texttt{max\_iter}.
+
+## Time binning parameters
+
+This parameters defines the strategy with which the time interval is divided in bins for each observed time. Specifically, the strategy is defined by three parameters $\delta, \Delta > 0$ and $n_{max}$. For an observed time $t_i$ the bins are defined as follow:
+
+$$
+t_i, t_i + \Delta, t_i + \Delta(1 + \delta), t_i + \Delta(1 + \delta)^2,....
+$$
+The parameter $n_{max}$ is the maximum value assumed by the exponent and regulates the maximum number of bins. If $t_i + \Delta(1 + \delta)^{n_{max}} < T_2$ then we have exactly $n_{max} + 2$ bins, which is the maximum number of bins per observations. The parameter $\Delta$ regulates the length of the first bin (and subsequent ones). The parameter $\delta$ regulates the increase in length considering additional bins. They have to be provided as follow
+
+* **coef.t** = value of the parameter $\delta$
+* **DELTA** = value of the parameter $\Delta$
+* **Nmax** = value of the parameter $n_{max}$
+
+## Forecast
+
+The parameters defining the forecasting experiment are:
+
+* **n.periods** = number of periods to be forecasted
+* **period.length** = the length of each forecasting period in days
+* **start.date.fore** = starting date of the forecasting experiment with format "yyyy-mm-dd hh:mm:ss"
+* **magnitude.update** = magnitude at which we split a period. If we record an event at time $t_k$ in a forecasting period with magnitude greater than the provided value, then, the end of the forecasting period is set to be $t_k$ and a new forecasting period is started at from $t_k$.
+
+## Output name
+
+A string containing the name of the output \texttt{pdf} document. It does not need to include the \texttt{.pdf} at the end, this will be added automatically with the date in which the document has been produced. Given an \texttt{output.name} the resulting \texttt{pdf} document will be called \texttt{output.name.currentdate.pdf}.
+
+
+# Reading the input
+
+We provide a function to automatically read the \texttt{txt} input file provided by the user. The only input required by this function is the path of the input file.
+
+```{r}
+list.input <- input.file.to.list('user_input.txt')
+```
+
+The function returns a list of $17$ elements containing:
+
+1. \texttt{catalog} = the input catalog as it is provided.
+2. \texttt{catalog.bru} = the input catalog in the format needed for inlabru
+3. \texttt{time.int} = the provided start and end date in string format
+4. \texttt{T12} = the start and end date as number of days from the provided starting date
+5. \texttt{lat.int} = the provided minimum and maximum latitudes
+6. \texttt{lon.int} = the provided minimum and maximum longitudes
+7. \texttt{M0} = the provided magnitude of completeness
+8. \texttt{link.functions} = a list of functions use to trasform the parameters from the internal scale to the ETAS scale
+9. \texttt{bru.opt.list} = a list of options for Inlabru, contains also the starting value of the parameters in the internal scale
+10. \texttt{coef.t} = $\delta$ parameter of the binning strategy
+11. \texttt{delta.t} = $\Delta$ parameter of the binning strategy
+12. \texttt{Nmax} = $n_{max}$ parameter of the binning strategy 
+13. \texttt{n.periods} = the provided number of forecasting periods
+14. \texttt{period.length} = the provided length of a forecasting period in days
+15. \texttt{start.date.fore} = the provided starting date of the forecasting experiment
+16. \texttt{magnitude.update} = the provided magnitude above which a new forecasting period is started.
+17. \texttt{output.name} = the provided string used as name for the output \texttt{pdf} document
+
+It is possible to check the arguments as follows:
+
+```{r}
+str(list.input)
+```
+
+
+# Fitting a model 
+
+To fit a model we provide a function that reads the input list created in the previous section (output of \texttt{input.file.to.list}) and fit the model. The functions returns the fitted model. 
+
+```{r}
+ETAS.model.fit <- Temporal.ETAS.fit(list.input)
+```
+
+
+It is convenient for the next passages to create a new list adding the fitted model to the input list. This list will be used as input of all the functions in the next sections.
+
+```{r}
+list.output <- append(list.input, list(model.fit = ETAS.model.fit))
+```
+
+# Parameters' posterior distribution
+
+We provide a function that extract the posterior distribution of the parameters in the ETAS scale taking as input the output of the \texttt{input.file.to.list} function. The function can be used as follow:
+
+```{r}
+post.list <- get_posterior_param(input.list = list.output)
+```
+
+The function returns a list of two elements:
+
+* \texttt{post.df} = a \texttt{data.frame} with three columns: \texttt{x} the value of the parameter, \texttt{y} the value of the posterior density at \texttt{x}, and \texttt{param} a string with the parameter name.
+* \texttt{post.plot} = a \texttt{ggplot} object containing a plot of the posteriors
+
+To plot the posterior we only need to run
+
+```{r}
+post.list$post.plot
+```
+
+# Sampling from the parameters' posterior distribution
+
+We provide a function to sample from the posterior distribution distribution of the ETAS parameters. The function takes in input the output of the function \texttt{input.file.to.list} and the number of desired samples. It can be used as follows:
+
+```{r}
+p.samp <- post_sampling(input.list = list.output, 
+                        n.samp = 1000)
+```
+
+The function returns a \texttt{data.frame} with as many rows as samples from the posterior and columns representing the ETAS parameters. We can plot the empirical distribution obtained from a sample of 1000 values from the parameters posterior to check that they match the true posterior distributions.
+
+```{r}
+ggplot(rbind(data.frame(x = p.samp$mu, param = 'mu'),
+             data.frame(x = p.samp$K, param = 'K'),
+             data.frame(x = p.samp$alpha, param = 'alpha'),
+             data.frame(x = p.samp$c, param = 'c'),
+             data.frame(x = p.samp$p, param = 'p')), aes(x = x)) + 
+  geom_density() + 
+  facet_wrap(facets = vars(param), scales = 'free', labeller = label_parsed)+
+  xlab('param')
+```
+
+# Number of events posterior distribution
+
+We provide a function to calculate the posterior summary statistics of the distribution of the distribution number of events. The number of events regards the time period used to fit the model, therefore, it can be seen as a retrospective test to check if the number of events expected by the model is coherent with the observed one. More specifically, the number of events in a time period $(T_1, T_2)$ has a Poisson distribution 
+
+$$
+N \sim \text{Pois}(\lambda_N)
+$$
+
+where 
+
+$$
+\lambda_N = \int_{T_1}^{T_2} \lambda(t | \mathcal H_t )dt
+$$
+where $\lambda(t | \mathcal H_t)$ is the conditional intensity given the history of the process up to time $t$ ($\mathcal H_t$). The parameter $\lambda_N$ has its own posterior distribution because it is a function of the ETAS parameters. This induces a distribution on the space of possible Poisson distributions for $N$. The functions returns posterior summary statistics of the distribution of the distribution of the number of events. 
+
+The function takes in input the output of the function \texttt{input.file.to.list}.
+
+```{r}
+post.N <- get_posterior_N(list.output)
+```
+
+The function returns a list of three objects:
+
+* \texttt{post.df} = \texttt{data.frame} containing summary posterior informations on the posterior distribution of the distribution of the number of events
+
+* \texttt{post.plot} = \texttt{ggplot} object containing the mean distribution of the number of events and a vertical dashed line representing the observed number of events
+
+* \texttt{post.plot.shaded} = \texttt{ggplot} as above but with the $95\%$ credibility interval for the distribution of the number of events
+
+They can be accessed 
+
+```{r}
+multiplot(post.N$post.plot, post.N$post.plot.shaded, cols = 2)
+```
+
+# Forecasting experiment
+
+We provide a function to run a forecasting experiment producing catalogue-based forecast of seismicity of a number of periods provided by the user in the input file. Each period has the same length which is also provided by the user and must be in days. Also, we require a magnitude value for which a new forecasting interval is started when an event with magnitude above the provided value is recorded. For each forecasting period, the simulate a number of simulated catalogue equal to the number of parameters' posterior samples provided. Each catalogue is generate using one sample from the posterior of the ETAS parameters. The catalogue-based forecast for each period is stored in a \texttt{txt} file with name and path provided by the user.
+
+The function takes in input 
+
+* **input.list** = the output of the function \texttt{input.file.to.list}.
+* **par.sample** = the output of the function \texttt{post\_sampling}.
+* **beta.par** = the parameter of the GR law used for sampling the magnitude ($b = \beta/log(10)$)
+* **folder.path** = path of the folder in which the forecasts will be stored
+* **fore.name** = string representing the name of each forecast at which will be pasted the period number at which it is referring to.
+
+```{r, eval = FALSE}
+#' Leave the code as it is only if forecasts have already been produced
+#' Otherwise move eval = FALSE to the next code chunk if we want to produce forecasts
+beta.p <- (1/mean(list.output$catalog.bru$magnitudes - list.output$M0))
+
+prod.fore <- produce.forecast(input.list = list.output, 
+                              par.sample = p.samp, 
+                              beta.par = beta.p, 
+                              folder.path = 'fore_cat/',
+                              fore.name = 'fore.day.')
+```
+
+The function returns a list with just one element \texttt{t.lims} which is a \texttt{data.frame} with the extremes of each forecasting period.
+
+If we already have a forecast, then we just need the \texttt{t.lims} \texttt{data.frame} to run the remaining code. This can be obtained with the function \texttt{find.fore.tlims} which only needs the output of \texttt{input.file.to.list} function as input. 
+
+```{r}
+prod.fore <- find.fore.tlim(list.output)
+```
+
+
+# Forecasted number of events
+
+We provide a function to extract information on the number of events distribution in each forecasting period. The function takes in input:
+
+* **input.list** = the output of the function \texttt{input.file.to.list}.
+* **n.rep** = number of simulated catalogues for each forecasting period. It is equal to the number of rows of the posterior samples dataframe provided above.
+* **t.lims** = the output of the function \texttt{produce.forecast}.
+* **folder.path** = path of the folder in which the forecasts will be stored
+* **fore.name** = string representing the name of each forecast at which will be pasted the period number at which it is referring to.
+
+
+```{r}
+fore.N <- summary.forecast.N(input.list = list.output, 
+                             n.rep = nrow(p.samp), 
+                             t.lims = prod.fore$t.lims,
+                             folder.path = 'fore_cat/', 
+                             fore.name = 'fore.day.')
+
+```
+
+The function returns a \texttt{data.frame} with as many rows as the number of forecasted periods and 4 columns: 
+
+* **q0.025** = $0.025$ quantile of the empirical distribution of the number of events
+* **median** = median of the empirical distribution of the number of events
+* **q0.975** = $0.975$ quantile of the empirical distribution of the number of events
+* **true** = observed number of events
+
+We can plot this values as follows:
+
+```{r}
+#' this plot is in log10 scale, if we want it in the natural scale just remove all the
+#' log10 commands from below. Also the scale_y_log10() function does not work very
+#' well in this example, I recommend to be avoided. 
+
+ggplot(fore.N, aes(x = 1:list.output$n.periods, 
+                   y = log10(median))) + 
+  geom_line(color = 'red') + 
+  geom_ribbon(aes(xmin = 1:list.output$n.periods, 
+                  xmax = 1:list.output$n.periods, 
+                  ymin = log10(q0.025), 
+                  ymax = log10(q0.975)),
+              alpha = 0.2, color = 'orange', fill = 'orange') + 
+  geom_point(aes(x = 1:list.output$n.periods, 
+                 y = log10(true))) + #, size = 0.5)) + 
+  #scale_y_log10() + 
+  xlab('periods') + 
+  ylab('log10(N)')
+```
+
+# Produce document 
+
+To produce a \texttt{pdf} document in output. The function takes as input the name of the current \texttt{Rmarkdown} document to render and the \texttt{output.name} contained in the input document provided by the user. The option \texttt{eval = FALSE} it is crucial in this, if we remove it then we would not be able to render the document. Indeed, the command below needs to be copied and ran from the console. Running it from the code chunk itself will cause an error. The command can also be ran without opening the \texttt{Rmarkdown} file, however, in that case \texttt{list.output$output.name} needs to be replaced by a string with the desired name for the document (e.g \texttt{'report\_ETAS'}).
+
+```{r, eval = FALSE}
+rmarkdown::render('temporal_ETAS_tutorial.Rmd',
+                  output_file = paste(list.output$output.name, '.', Sys.Date(), 
+                                      '.pdf', sep=''))
+```
+
+
+
